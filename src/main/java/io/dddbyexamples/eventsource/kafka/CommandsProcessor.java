@@ -82,7 +82,9 @@ class CommandsProcessor {
         producerConfig.put(ProducerConfig.ACKS_CONFIG, "all");
         producerConfig.put(ProducerConfig.CLIENT_ID_CONFIG, "my-client-id");
 
-        return new KafkaProducer<>(producerConfig, jsonSerdes.forA(UUID.class).serializer(), jsonSerdes.forA(DomainEvent.class).serializer());
+        return new KafkaProducer<>(producerConfig, jsonSerdes.forA(UUID.class)
+                                                             .serializer(), jsonSerdes.forA(DomainEvent.class)
+                                                                                      .serializer());
     }
 
     @PostConstruct
@@ -93,37 +95,7 @@ class CommandsProcessor {
         executor.submit(() -> {
             while (true) {
                 try {
-                    Map<TopicPartition, OffsetAndMetadata> consumedOffsets = new HashMap<>();
-                    producer.beginTransaction();
-                    ConsumerRecords<UUID, Command> records = consumer.poll(Long.MAX_VALUE);
-                    List<UUID> futureIds = new ArrayList<>();
-                    for (ConsumerRecord<UUID, Command> record : records) {
-                        if (record.value() instanceof Buy) {
-
-                            ShopItem shopItem;
-                            try {
-                                shopItem= getByUUID(record.key());
-                                UUID uuid = ((Buy) record.value()).getUuid();
-                                Instant when = ((Buy) record.value()).getWhen();
-                                shopItem = shopItem.buy(uuid, when, hoursToPaymentTimeout);
-                            } catch (Exception e) {
-                                shopItem = null;
-                            }
-
-                            /** if cannot apply command on aggregate do not publish changes */
-                            if (shopItem != null) {
-                                shopItem.getUncommittedChanges().forEach(domainEvent -> producer.send(new ProducerRecord<>("shop-items", domainEvent.uuid(), domainEvent)));
-                                futureIds.add(record.key());
-                            }
-                            recordOffset(consumedOffsets, record);
-                        } else {
-                            throw new IllegalStateException();
-                        }
-                    }
-
-                    producer.sendOffsetsToTransaction(consumedOffsets, SOME_GROUP_ID_2);
-                    producer.commitTransaction();
-                    futureIds.forEach(f -> futures.complete(f));
+                    applyCommandsOnAggregates();
                 } catch (Exception ex) {
                     System.err.println(ex);
                     producer.abortTransaction();
@@ -133,6 +105,54 @@ class CommandsProcessor {
         });
     }
 
+    private void applyCommandsOnAggregates() {
+        Map<TopicPartition, OffsetAndMetadata> consumedOffsets = new HashMap<>();
+        producer.beginTransaction();
+        ConsumerRecords<UUID, Command> records = consumer.poll(Long.MAX_VALUE);
+        List<UUID> futureIds = new ArrayList<>();
+
+        for (ConsumerRecord<UUID, Command> record : records) {
+            if (record.value() instanceof Buy) {
+                ShopItem shopItem = applyCommandOnAggregate(record);
+                if (commandAppliedCorrectly(shopItem)) {
+                    publishUncommittedChangesToKafka(futureIds, record, shopItem);
+                }
+                recordOffset(consumedOffsets, record);
+            }
+        }
+
+        producer.sendOffsetsToTransaction(consumedOffsets, SOME_GROUP_ID_2);
+        producer.commitTransaction();
+        notifyListeners(futureIds);
+    }
+
+    private void notifyListeners(List<UUID> futureIds) {
+        futureIds.forEach(f -> futures.complete(f));
+    }
+
+    private void publishUncommittedChangesToKafka(List<UUID> futureIds, ConsumerRecord<UUID, Command> record, ShopItem shopItem) {
+        shopItem.getUncommittedChanges()
+                .forEach(domainEvent -> producer.send(new ProducerRecord<>("shop-items", domainEvent.uuid(), domainEvent)));
+        futureIds.add(record.key());
+    }
+
+    private boolean commandAppliedCorrectly(ShopItem shopItem) {
+        return shopItem != null;
+    }
+
+    private ShopItem applyCommandOnAggregate(ConsumerRecord<UUID, Command> record) {
+        ShopItem shopItem;
+        try {
+            shopItem = getByUUID(record.key());
+            UUID uuid = ((Buy) record.value()).getUuid();
+            Instant when = ((Buy) record.value()).getWhen();
+            shopItem = shopItem.buy(uuid, when, hoursToPaymentTimeout);
+        } catch (Exception e) {
+            shopItem = null;
+        }
+        return shopItem;
+    }
+
     private void recordOffset(Map<TopicPartition, OffsetAndMetadata> consumedOffsets,
             ConsumerRecord<UUID, Command> record) {
         OffsetAndMetadata nextOffset = new OffsetAndMetadata(record.offset() + 1);
@@ -140,8 +160,9 @@ class CommandsProcessor {
     }
 
     private ShopItem getByUUID(UUID key) {
-        return Optional.ofNullable(kafkaStreams.store("shop-items-store", QueryableStoreTypes.<UUID, ShopItem>keyValueStore()).get(key))
-                .orElse(ShopItem.from(key, Collections.emptyList()));
+        return Optional.ofNullable(kafkaStreams.store("shop-items-store", QueryableStoreTypes.<UUID, ShopItem> keyValueStore())
+                                               .get(key))
+                       .orElse(ShopItem.from(key, Collections.emptyList()));
     }
 
 }
