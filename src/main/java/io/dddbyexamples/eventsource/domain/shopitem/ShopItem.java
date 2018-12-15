@@ -20,7 +20,7 @@ public class ShopItem {
 
     @Getter
     private final UUID uuid;
-    private final ImmutableList<DomainEvent> changes;
+    private final List<DomainEvent> changes;
     private final ShopItemState state;
 
     public ShopItem buy(UUID uuid, Instant when, int hoursToPaymentTimeout) {
@@ -103,7 +103,7 @@ public class ShopItem {
                 .build();
     }
 
-    private ShopItem apply(DomainEvent event) {
+    public ShopItem apply(DomainEvent event) {
         if (event instanceof ItemPaid) {
             return this.apply((ItemPaid) event);
         } else if (event instanceof ItemBought) {
@@ -119,7 +119,7 @@ public class ShopItem {
         return applyChange(event, true);
     }
 
-    public ImmutableList<DomainEvent> getUncommittedChanges() {
+    public List<DomainEvent> getUncommittedChanges() {
         return changes;
     }
 

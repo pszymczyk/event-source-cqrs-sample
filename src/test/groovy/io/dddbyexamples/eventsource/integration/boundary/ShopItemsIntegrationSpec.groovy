@@ -6,6 +6,7 @@ import io.dddbyexamples.eventsource.eventstore.EventStore
 import io.dddbyexamples.eventsource.integration.IntegrationSpec
 import org.springframework.beans.factory.annotation.Autowired
 import spock.lang.Subject
+import spock.util.concurrent.PollingConditions
 
 import static io.dddbyexamples.eventsource.CommandFixture.*
 import static io.dddbyexamples.eventsource.domain.shopitem.ShopItemState.*
@@ -21,12 +22,16 @@ class ShopItemsIntegrationSpec extends IntegrationSpec {
     @Autowired
     EventStore eventStore
 
+
+
     def 'item should wait for payment when create bought item command comes and no item yet'() {
         when:
             shopItems.buy(buyItemCommand(uuid))
         then:
-            ShopItem tx = shopItems.getByUUID(uuid)
-            tx.state == BOUGHT
+            new PollingConditions(timeout: 5).eventually {
+                ShopItem tx = shopItems.getByUUID(uuid)
+                assert tx.state == BOUGHT
+            }
     }
 
     def 'item should be paid when paying for bought item'() {

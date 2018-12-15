@@ -9,7 +9,9 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static java.util.stream.Collectors.toList;
@@ -20,6 +22,8 @@ public class EventSourcedShopItemRepository implements ShopItemRepository {
     private final EventStore eventStore;
     private final EventSerializer eventSerializer;
     private final ApplicationEventPublisher eventPublisher;
+
+
 
     @Autowired
     public EventSourcedShopItemRepository(EventStore eventStore, EventSerializer eventSerializer, ApplicationEventPublisher eventPublisher) {
