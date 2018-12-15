@@ -82,8 +82,7 @@ class CommandsProcessor {
         producerConfig.put(ProducerConfig.ACKS_CONFIG, "all");
         producerConfig.put(ProducerConfig.CLIENT_ID_CONFIG, "my-client-id");
 
-        return new KafkaProducer<>(producerConfig, jsonSerdes.forA(UUID.class).serializer(),
-                jsonSerdes.forA(DomainEvent.class).serializer());
+        return new KafkaProducer<>(producerConfig, jsonSerdes.forA(UUID.class).serializer(), jsonSerdes.forA(DomainEvent.class).serializer());
     }
 
     @PostConstruct
@@ -100,15 +99,23 @@ class CommandsProcessor {
                     List<UUID> futureIds = new ArrayList<>();
                     for (ConsumerRecord<UUID, Command> record : records) {
                         if (record.value() instanceof Buy) {
-                            ShopItem shopItem = getByUUID(record.key());
-                            UUID uuid = ((Buy) record.value()).getUuid();
-                            Instant when = ((Buy) record.value()).getWhen();
-                            shopItem = shopItem.buy(uuid, when, hoursToPaymentTimeout);
-                            shopItem.getUncommittedChanges()
-                                    .forEach(domainEvent -> producer.send(new ProducerRecord<>("shop-items", domainEvent
-                                            .uuid(), domainEvent)));
+
+                            ShopItem shopItem;
+                            try {
+                                shopItem= getByUUID(record.key());
+                                UUID uuid = ((Buy) record.value()).getUuid();
+                                Instant when = ((Buy) record.value()).getWhen();
+                                shopItem = shopItem.buy(uuid, when, hoursToPaymentTimeout);
+                            } catch (Exception e) {
+                                shopItem = null;
+                            }
+
+                            /** if cannot apply command on aggregate do not publish changes */
+                            if (shopItem != null) {
+                                shopItem.getUncommittedChanges().forEach(domainEvent -> producer.send(new ProducerRecord<>("shop-items", domainEvent.uuid(), domainEvent)));
+                                futureIds.add(record.key());
+                            }
                             recordOffset(consumedOffsets, record);
-                            futureIds.add(record.key());
                         } else {
                             throw new IllegalStateException();
                         }

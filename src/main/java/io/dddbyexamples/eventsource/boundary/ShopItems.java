@@ -58,7 +58,6 @@ import static java.util.Collections.singleton;
 @Slf4j
 public class ShopItems {
 
-    private final ShopItemRepository itemRepository;
     private JsonSerdes jsonSerdes;
     private KafkaStreams kafkaStreams;
     private Futures futures;
@@ -66,11 +65,9 @@ public class ShopItems {
     private final KafkaProducer<UUID, Command> commandProducer;
 
     @Autowired
-    public ShopItems(ShopItemRepository itemRepository,
-            JsonSerdes jsonSerdes,
+    public ShopItems(JsonSerdes jsonSerdes,
             KafkaStreams kafkaStreams,
             Futures futures) {
-        this.itemRepository = itemRepository;
         this.jsonSerdes = jsonSerdes;
         this.kafkaStreams = kafkaStreams;
         this.futures = futures;
@@ -93,7 +90,7 @@ public class ShopItems {
 
         //await until proceed or throw exception
         try {
-            String completed = completableFuture.get(20, TimeUnit.SECONDS);
+            String completed = completableFuture.get(500, TimeUnit.MILLISECONDS);
             System.err.println(completed);
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
             throw new RuntimeException();
@@ -111,11 +108,4 @@ public class ShopItems {
         return Optional.ofNullable(kafkaStreams.store("shop-items-store", QueryableStoreTypes.<UUID, ShopItem> keyValueStore())
                                                .get(uuid)).orElse(ShopItem.from(uuid, Collections.emptyList()));
     }
-
-    private ShopItem withItem(UUID uuid, UnaryOperator<ShopItem> action) {
-        final ShopItem tx = getByUUID(uuid);
-        final ShopItem modified = action.apply(tx);
-        return itemRepository.save(modified);
-    }
-
 }
